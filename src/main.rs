@@ -1,6 +1,8 @@
 // heavily (with emphasis) based on https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 
-#[derive(Debug)]
+use core::f64;
+
+#[derive(Debug, Clone, PartialEq)]
 enum Token {
     Value(f64),
     Operation(String),
@@ -32,6 +34,14 @@ fn matches_simple_operation(c: char) -> Option<Token> {
         '^' => Some(Token::Power),
         _ => None,
     }
+}
+
+fn match_functions(func: &str, rhs: f64) -> Option<f64> {
+    let res = match func {
+        "sqrt" => f64::sqrt(rhs),
+        _ => return None,
+    };
+    Some(res)
 }
 
 impl Lexer {
@@ -80,9 +90,11 @@ impl Lexer {
                 }
                 // add the word to token list
                 tokens.push(Token::Operation(word));
+            } else {
+                tokens.clear();
+                return Lexer { tokens };
             }
         }
-
         tokens.reverse();
         Lexer { tokens }
     }
@@ -91,61 +103,130 @@ impl Lexer {
         self.tokens.pop().unwrap_or(Token::Eof)
     }
 
-    fn peek(&mut self) -> &Token {
-        self.tokens.last().unwrap_or(&Token::Eof)
+    fn peek(&self) -> Token {
+        self.tokens.last().cloned().unwrap_or(Token::Eof)
     }
 }
 
 fn expr(input: &str) -> Option<f64> {
     let mut lexer = Lexer::new(input);
-    expr_bp(&mut lexer, 0)
+    let res = expr_bp(&mut lexer, 0);
+    if lexer.peek() == Token::Eof {
+        res
+    } else {
+        None
+    }
 }
 
 fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Option<f64> {
-    let mut result = None;
-    if let Some(lhs) = match lexer.next() {
-        Token::Value(it) => Some(it),
-        _ => None,
-    } {
-        loop {
-            if let Some(op) = match lexer.next() {
-                Token::Eof => break,
-                Token::Operation(operation) => Some(operation),
-                Token::Addition => Some("+".to_owned()),
-                Token::Subtraction => Some("-".to_owned()),
-                Token::Multiplication => Some("*".to_owned()),
-                Token::Division => Some("/".to_owned()),
-                Token::LeftParenthesis => Some("(".to_owned()),
-                Token::RightParenthesis => Some(")".to_owned()),
-                Token::Factorial => Some("!".to_owned()),
-                Token::Power => Some("^".to_owned()),
-                _ => None,
-            } {
-                let (l_bp, r_bp) = infix_binding_power(&op);
-                if l_bp < min_bp {
-                    break;
-                }
-
-                lexer.next();
-                if let Some(rhs) = expr_bp(lexer, r_bp) {
-                    result = match op.as_str() {
-                        "+" => Some(lhs + rhs),
-                        _ => None,
-                    }
-                }
+    let mut lhs = match lexer.next() {
+        Token::Value(val) => val,
+        Token::LeftParenthesis => {
+            let lhs = expr_bp(lexer, 0)?;
+            if lexer.next() == Token::RightParenthesis {
+                lhs
+            } else {
+                return None;
             }
         }
-    }
+        op => {
+            let ((), r_bp) = prefix_binding_power(&op)?;
+            let rhs = expr_bp(lexer, r_bp)?;
+            let rhs = eval_prefix(&op, rhs)?;
+            rhs
+        }
+    };
 
-    result
+    loop {
+        let op = lexer.peek();
+        if matches!(op, Token::Eof | Token::RightParenthesis) {
+            break;
+        }
+        if let Some((l_bp, ())) = postfix_binding_power(&op) {
+            if l_bp < min_bp {
+                break;
+            }
+            lexer.next();
+            lhs = eval_postfix(&op, lhs)?;
+            continue;
+        }
+        if matches!(op, Token::LeftParenthesis | Token::Operation(_)) {
+            let (l_bp, r_bp) = infix_binding_power(&Token::Multiplication)?;
+            if l_bp < min_bp {
+                break;
+            }
+            let rhs = expr_bp(lexer, r_bp)?;
+            lhs = eval_infix(&Token::Multiplication, lhs, rhs)?;
+            continue;
+        }
+        if let Some((l_bp, r_bp)) = infix_binding_power(&op) {
+            if l_bp < min_bp {
+                break;
+            }
+            lexer.next();
+            let rhs = expr_bp(lexer, r_bp)?;
+            lhs = eval_infix(&op, lhs, rhs)?;
+            continue;
+        }
+        return None;
+    }
+    Some(lhs)
 }
 
-fn infix_binding_power(op: &str) -> (u8, u8) {
-    match op {
-        "+" | "-" => (1, 2),
-        "*" | "/" => (3, 4),
-        _ => panic!("bad op: {:?}", op),
-    }
+fn prefix_binding_power(op: &Token) -> Option<((), u8)> {
+    let res = match op {
+        Token::Addition | Token::Subtraction => ((), 5),
+        Token::Operation(_) => ((), 5),
+        _ => return None,
+    };
+    Some(res)
+}
+
+fn eval_prefix(op: &Token, rhs: f64) -> Option<f64> {
+    let res = match op {
+        Token::Addition => rhs,
+        Token::Subtraction => -rhs,
+        Token::Operation(func) => match_functions(func, rhs)?,
+        _ => return None,
+    };
+    Some(res)
+}
+
+fn infix_binding_power(op: &Token) -> Option<(u8, u8)> {
+    let res = match op {
+        Token::Addition | Token::Subtraction => (1, 2),
+        Token::Multiplication | Token::Division => (3, 4),
+        Token::LeftParenthesis => (3, 4),
+        _ => return None,
+    };
+    Some(res)
+}
+
+fn eval_infix(op: &Token, lhs: f64, rhs: f64) -> Option<f64> {
+    let res = match op {
+        Token::Addition => lhs + rhs,
+        Token::Subtraction => lhs - rhs,
+        Token::Multiplication => lhs * rhs,
+        Token::Division => lhs / rhs,
+        _ => return None,
+    };
+    Some(res)
+}
+
+fn postfix_binding_power(op: &Token) -> Option<(u8, ())> {
+    let res = match op {
+        Token::Factorial => (7, ()),
+        _ => return None,
+    };
+    return Some(res);
+}
+
+fn eval_postfix(op: &Token, lhs: f64) -> Option<f64> {
+    let res = match op {
+        Token::Factorial => libm::tgamma(lhs + 1.0),
+        _ => return None,
+    };
+    Some(res)
 }
 
 #[test]
@@ -156,12 +237,18 @@ fn tests() {
 }
 
 fn main() {
-    dbg!(Lexer::new("5+3-10(sqrt(3))"));
+    dbg!(Lexer::new("4"));
     dbg!(Lexer::new("5.32"));
+    dbg!(Lexer::new("5(10)"));
     dbg!(Lexer::new("5.32.3"));
+    dbg!(Lexer::new("sqrt(9)"));
     dbg!(Lexer::new("5.32*3/3"));
+    dbg!(Lexer::new("5+3-10(sqrt(3))"));
     dbg!(expr("4"));
-    if let Some(s) = expr("1") {
-        print!("{s}");
-    }
+    dbg!(expr("5.32"));
+    dbg!(expr("5(10)"));
+    dbg!(expr("5.32.3"));
+    dbg!(expr("sqrt(9)"));
+    dbg!(expr("5.32*3/3"));
+    dbg!(expr("5+3-10(sqrt(3))"));
 }

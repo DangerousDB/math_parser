@@ -108,7 +108,7 @@ impl Lexer {
                     }
                 }
                 // check if we can turn number into float
-                if let Some(float) = number.parse().ok() {
+                if let Ok(float) = number.parse() {
                     tokens.push(Token::Value(float));
                 } else {
                     // if we cant then parsing has failed
@@ -173,8 +173,8 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Option<f64> {
         op => {
             let ((), r_bp) = prefix_binding_power(&op)?;
             let rhs = expr_bp(lexer, r_bp)?;
-            let rhs = eval_prefix(&op, rhs)?;
-            rhs
+            
+            eval_prefix(&op, rhs)?
         }
     };
 
@@ -259,7 +259,7 @@ fn postfix_binding_power(op: &Token) -> Option<(u8, ())> {
         Token::Factorial => (7, ()),
         _ => return None,
     };
-    return Some(res);
+    Some(res)
 }
 
 fn eval_postfix(op: &Token, lhs: f64) -> Option<f64> {
@@ -270,10 +270,145 @@ fn eval_postfix(op: &Token, lhs: f64) -> Option<f64> {
     Some(res)
 }
 
-#[test]
-fn tests() {
-    if let Some(s) = expr("1") {
-        print!("{s}");
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64::consts::{E, PI};
+
+    fn check(cases: &[(&str, f64)]) {
+        for &(input, expected) in cases {
+            let got = expr(input).unwrap_or_else(|| panic!("`{input}` failed to parse"));
+            assert!(
+                (got - expected).abs() < 1e-9,
+                "`{input}`: expected {expected}, got {got}"
+            );
+        }
+    }
+
+    #[test]
+    fn numbers() {
+        check(&[("5", 5.0), ("5.32", 5.32), (".5", 0.5), ("  7  ", 7.0)]);
+    }
+
+    #[test]
+    fn arithmetic() {
+        check(&[
+            ("1+2", 3.0),
+            ("5-8", -3.0),
+            ("2*3+4", 10.0),
+            ("2+3*4", 14.0),
+            ("10/4", 2.5),
+            ("5.32*3/3", 5.32),
+            ("(2+3)*4", 20.0),
+            ("1 + 2 * 3", 7.0),
+        ]);
+    }
+
+    #[test]
+    fn unary_and_factorial() {
+        check(&[("-3", -3.0), ("+3", 3.0), ("--3", 3.0), ("5!", 120.0), ("0!", 1.0), ("3!+1", 7.0)]);
+    }
+
+    #[test]
+    fn implicit_multiplication() {
+        check(&[("5(10)", 50.0), ("2sqrt(16)", 8.0), ("5+3-10(sqrt(4))", -12.0)]);
+    }
+
+    #[test]
+    fn roots() {
+        check(&[("sqrt25", 5.0), ("sqrt(25)", 5.0), ("sqrt 25", 5.0), ("cbrt27", 3.0), ("cbrt(-8)", -2.0)]);
+    }
+
+    #[test]
+    fn trigonometric() {
+        check(&[
+            ("sin0", 0.0),
+            ("cos0", 1.0),
+            ("cos(3.141592653589793)", -1.0),
+            ("tan0", 0.0),
+            ("sec0", 1.0),
+            ("csc(1.5707963267948966)", 1.0),
+            ("cot(0.7853981633974483)", 1.0),
+        ]);
+    }
+
+    #[test]
+    fn inverse_trigonometric() {
+        check(&[
+            ("asin1", PI / 2.0),
+            ("arcsin1", PI / 2.0),
+            ("acos(-1)", PI),
+            ("arccos1", 0.0),
+            ("atan1", PI / 4.0),
+            ("arctan0", 0.0),
+        ]);
+    }
+
+    #[test]
+    fn hyperbolic() {
+        check(&[
+            ("sinh0", 0.0),
+            ("cosh0", 1.0),
+            ("tanh0", 0.0),
+            ("sinh1", (E - 1.0 / E) / 2.0),
+            ("asinh0", 0.0),
+            ("arsinh0", 0.0),
+            ("acosh1", 0.0),
+            ("arcosh1", 0.0),
+            ("atanh0", 0.0),
+            ("artanh0", 0.0),
+        ]);
+    }
+
+    #[test]
+    fn exponential_and_logarithmic() {
+        check(&[
+            ("exp0", 1.0),
+            ("exp1", E),
+            ("ln(exp(2))", 2.0),
+            ("log1000", 3.0),
+            ("lg100", 2.0),
+            ("lb8", 3.0),
+        ]);
+    }
+
+    #[test]
+    fn rounding_and_sign() {
+        check(&[
+            ("abs(-3.5)", 3.5),
+            ("floor2.7", 2.0),
+            ("floor(-2.3)", -3.0),
+            ("ceil2.1", 3.0),
+            ("round2.5", 3.0),
+            ("trunc(-2.7)", -2.0),
+            ("sign(-5)", -1.0),
+            ("sgn5", 1.0),
+            ("sign0", 0.0),
+        ]);
+    }
+
+    #[test]
+    fn gamma() {
+        check(&[("gamma5", 24.0), ("gamma(0.5)", PI.sqrt())]);
+    }
+
+    #[test]
+    fn combined() {
+        check(&[
+            ("sin0+cos0", 1.0),
+            ("lg(100)+lb(8)", 5.0),
+            ("-abs3", -3.0),
+            ("sqrt(sqrt(16))", 2.0),
+            ("floor(2.7)*ceil(2.1)", 6.0),
+            ("2sqrt(9)+1", 7.0),
+        ]);
+    }
+
+    #[test]
+    fn invalid_input() {
+        for input in ["", "5.32.3", "(1+2", "1+2)", "2 $ 3", "foo(1)", "1+", "*2"] {
+            assert_eq!(expr(input), None, "`{input}` should not parse");
+        }
     }
 }
 

@@ -1,4 +1,3 @@
-// heavily (with emphasis) based on https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 
 use core::f64;
 
@@ -413,18 +412,4 @@ mod tests {
 }
 
 fn main() {
-    dbg!(Lexer::new("4"));
-    dbg!(Lexer::new("5.32"));
-    dbg!(Lexer::new("5(10)"));
-    dbg!(Lexer::new("5.32.3"));
-    dbg!(Lexer::new("sqrt(9)"));
-    dbg!(Lexer::new("5.32*3/3"));
-    dbg!(Lexer::new("5+3-10(sqrt(3))"));
-    dbg!(expr("4"));
-    dbg!(expr("5.32"));
-    dbg!(expr("5(10)"));
-    dbg!(expr("5.32.3"));
-    dbg!(expr("sqrt(9)"));
-    dbg!(expr("5.32*3/3"));
-    dbg!(expr("5+3-10(sqrt(3))"));
 }

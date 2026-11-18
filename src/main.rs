@@ -38,7 +38,48 @@ fn matches_simple_operation(c: char) -> Option<Token> {
 
 fn match_functions(func: &str, rhs: f64) -> Option<f64> {
     let res = match func {
-        "sqrt" => f64::sqrt(rhs),
+        // roots
+        "sqrt" => rhs.sqrt(),
+        "cbrt" => rhs.cbrt(),
+        // trigonometric
+        "sin" => rhs.sin(),
+        "cos" => rhs.cos(),
+        "tan" => rhs.tan(),
+        "sec" => 1.0 / rhs.cos(),
+        "csc" => 1.0 / rhs.sin(),
+        "cot" => 1.0 / rhs.tan(),
+        // inverse trigonometric
+        "asin" | "arcsin" => rhs.asin(),
+        "acos" | "arccos" => rhs.acos(),
+        "atan" | "arctan" => rhs.atan(),
+        // hyperbolic
+        "sinh" => rhs.sinh(),
+        "cosh" => rhs.cosh(),
+        "tanh" => rhs.tanh(),
+        "asinh" | "arsinh" => rhs.asinh(),
+        "acosh" | "arcosh" => rhs.acosh(),
+        "atanh" | "artanh" => rhs.atanh(),
+        // exponential & logarithmic
+        // (the lexer only builds words from letters, so log10/log2 are spelled lg/lb)
+        "exp" => rhs.exp(),
+        "ln" => rhs.ln(),
+        "log" | "lg" => rhs.log10(),
+        "lb" => rhs.log2(),
+        // rounding & sign
+        "abs" => rhs.abs(),
+        "floor" => rhs.floor(),
+        "ceil" => rhs.ceil(),
+        "round" => rhs.round(),
+        "trunc" => rhs.trunc(),
+        "sign" | "sgn" => {
+            if rhs == 0.0 {
+                0.0
+            } else {
+                rhs.signum()
+            }
+        }
+        // special
+        "gamma" => libm::tgamma(rhs),
         _ => return None,
     };
     Some(res)

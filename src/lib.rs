@@ -1,9 +1,8 @@
-
 use core::f64;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
-    Value(f64),
+    Value(Value),
     Operation(String),
     Addition,
     Subtraction,
@@ -13,12 +12,25 @@ enum Token {
     RightParenthesis,
     Factorial,
     Power,
-    Unit,
     Eof,
 }
+
 #[derive(Debug)]
 struct Lexer {
     tokens: Vec<Token>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Value {
+    num: f64,
+    unit: Option<UnitType>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum UnitType {
+    Distance(String),
+    Mass(String),
+    Time(String),
 }
 
 fn matches_simple_operation(c: char) -> Option<Token> {
@@ -108,7 +120,10 @@ impl Lexer {
                 }
                 // check if we can turn number into float
                 if let Ok(float) = number.parse() {
-                    tokens.push(Token::Value(float));
+                    tokens.push(Token::Value(Value {
+                        num: float,
+                        unit: None,
+                    }));
                 } else {
                     // if we cant then parsing has failed
                     tokens.clear();
@@ -148,7 +163,7 @@ impl Lexer {
     }
 }
 
-pub fn expr(input: &str) -> Option<f64> {
+pub fn expr(input: &str) -> Option<Value> {
     let mut lexer = Lexer::new(input);
     let res = expr_bp(&mut lexer, 0);
     if lexer.peek() == Token::Eof {
@@ -158,7 +173,7 @@ pub fn expr(input: &str) -> Option<f64> {
     }
 }
 
-fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Option<f64> {
+fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Option<Value> {
     let mut lhs = match lexer.next() {
         Token::Value(val) => val,
         Token::LeftParenthesis => {
@@ -172,7 +187,7 @@ fn expr_bp(lexer: &mut Lexer, min_bp: u8) -> Option<f64> {
         op => {
             let ((), r_bp) = prefix_binding_power(&op)?;
             let rhs = expr_bp(lexer, r_bp)?;
-            
+
             eval_prefix(&op, rhs)?
         }
     };
@@ -222,14 +237,18 @@ fn prefix_binding_power(op: &Token) -> Option<((), u8)> {
     Some(res)
 }
 
-fn eval_prefix(op: &Token, rhs: f64) -> Option<f64> {
+fn eval_prefix(op: &Token, rhs: Value) -> Option<Value> {
+    let rhs_num = rhs.num;
     let res = match op {
-        Token::Addition => rhs,
-        Token::Subtraction => -rhs,
-        Token::Operation(func) => match_functions(func, rhs)?,
+        Token::Addition => rhs_num,
+        Token::Subtraction => -rhs_num,
+        Token::Operation(func) => match_functions(func, rhs_num)?,
         _ => return None,
     };
-    Some(res)
+    Some(Value {
+        num: res,
+        unit: rhs.unit,
+    })
 }
 
 fn infix_binding_power(op: &Token) -> Option<(u8, u8)> {
@@ -242,15 +261,21 @@ fn infix_binding_power(op: &Token) -> Option<(u8, u8)> {
     Some(res)
 }
 
-fn eval_infix(op: &Token, lhs: f64, rhs: f64) -> Option<f64> {
+// TODO: ADD UNIT TYPE CHECKING HERE
+fn eval_infix(op: &Token, lhs: Value, rhs: Value) -> Option<Value> {
+    let lhs_num = lhs.num;
+    let rhs_num = rhs.num;
     let res = match op {
-        Token::Addition => lhs + rhs,
-        Token::Subtraction => lhs - rhs,
-        Token::Multiplication => lhs * rhs,
-        Token::Division => lhs / rhs,
+        Token::Addition => lhs_num + rhs_num,
+        Token::Subtraction => lhs_num - rhs_num,
+        Token::Multiplication => lhs_num * rhs_num,
+        Token::Division => lhs_num / rhs_num,
         _ => return None,
     };
-    Some(res)
+    Some(Value {
+        num: res,
+        unit: lhs.unit,
+    })
 }
 
 fn postfix_binding_power(op: &Token) -> Option<(u8, ())> {
@@ -261,12 +286,16 @@ fn postfix_binding_power(op: &Token) -> Option<(u8, ())> {
     Some(res)
 }
 
-fn eval_postfix(op: &Token, lhs: f64) -> Option<f64> {
+fn eval_postfix(op: &Token, lhs: Value) -> Option<Value> {
+    let lhs_num = lhs.num;
     let res = match op {
-        Token::Factorial => libm::tgamma(lhs + 1.0),
+        Token::Factorial => libm::tgamma(lhs_num + 1.0),
         _ => return None,
     };
-    Some(res)
+    Some(Value {
+        num: res,
+        unit: lhs.unit,
+    })
 }
 
 #[cfg(test)]
@@ -277,9 +306,10 @@ mod tests {
     fn check(cases: &[(&str, f64)]) {
         for &(input, expected) in cases {
             let got = expr(input).unwrap_or_else(|| panic!("`{input}` failed to parse"));
+            let num = got.num;
             assert!(
-                (got - expected).abs() < 1e-9,
-                "`{input}`: expected {expected}, got {got}"
+                (num - expected).abs() < 1e-9,
+                "`{input}`: expected {expected}, got {num}"
             );
         }
     }
@@ -305,17 +335,34 @@ mod tests {
 
     #[test]
     fn unary_and_factorial() {
-        check(&[("-3", -3.0), ("+3", 3.0), ("--3", 3.0), ("5!", 120.0), ("0!", 1.0), ("3!+1", 7.0)]);
+        check(&[
+            ("-3", -3.0),
+            ("+3", 3.0),
+            ("--3", 3.0),
+            ("5!", 120.0),
+            ("0!", 1.0),
+            ("3!+1", 7.0),
+        ]);
     }
 
     #[test]
     fn implicit_multiplication() {
-        check(&[("5(10)", 50.0), ("2sqrt(16)", 8.0), ("5+3-10(sqrt(4))", -12.0)]);
+        check(&[
+            ("5(10)", 50.0),
+            ("2sqrt(16)", 8.0),
+            ("5+3-10(sqrt(4))", -12.0),
+        ]);
     }
 
     #[test]
     fn roots() {
-        check(&[("sqrt25", 5.0), ("sqrt(25)", 5.0), ("sqrt 25", 5.0), ("cbrt27", 3.0), ("cbrt(-8)", -2.0)]);
+        check(&[
+            ("sqrt25", 5.0),
+            ("sqrt(25)", 5.0),
+            ("sqrt 25", 5.0),
+            ("cbrt27", 3.0),
+            ("cbrt(-8)", -2.0),
+        ]);
     }
 
     #[test]
